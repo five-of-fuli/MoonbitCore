@@ -354,6 +354,11 @@ pub impl[K : Show] Show for Set[K] with output(self, logger) {
 }
 
 ///|
+pub impl[K] Default for Set[K] with default() {
+  Set::new()
+}
+
+///|
 /// Get the number of keys in the set.
 pub fn size[K](self : Set[K]) -> Int {
   self.size
@@ -508,5 +513,5 @@ pub impl[X : ToJson] ToJson for Set[X] with to_json(self) {
   for v in self {
     res.push(v.to_json())
   }
-  Array(res)
+  Json::array(res)
 }

@@ -168,18 +168,14 @@ pub fn Map::op_set[K : Hash + Eq, V](
 pub fn Map::get[K : Hash + Eq, V](self : Map[K, V], key : K) -> V? {
   let hash = key.hash()
   for i = 0, idx = hash & self.capacity_mask {
-    match self.entries[idx] {
-      Some(entry) => {
-        if entry.hash == hash && entry.key == key {
-          break Some(entry.value)
-        }
-        if i > entry.psl {
-          break None
-        }
-        continue i + 1, (idx + 1) & self.capacity_mask
-      }
-      None => break None
+    guard self.entries[idx] is Some(entry) else { break None }
+    if entry.hash == hash && entry.key == key {
+      break Some(entry.value)
     }
+    if i > entry.psl {
+      break None
+    }
+    continue i + 1, (idx + 1) & self.capacity_mask
   }
 }
 
@@ -253,9 +249,59 @@ pub fn Map::get_or_init[K : Hash + Eq, V](
 ///|
 /// Check if the hash map contains a key.
 pub fn Map::contains[K : Hash + Eq, V](self : Map[K, V], key : K) -> Bool {
-  match self.get(key) {
-    Some(_) => true
-    None => false
+  // inline Map::get to avoid boxing
+  let hash = key.hash()
+  for i = 0, idx = hash & self.capacity_mask {
+    guard self.entries[idx] is Some(entry) else { break false }
+    if entry.hash == hash && entry.key == key {
+      break true
+    }
+    if i > entry.psl {
+      break false
+    }
+    continue i + 1, (idx + 1) & self.capacity_mask
+  }
+}
+
+///|
+/// Checks if a map contains a specific key-value pair.
+///
+/// Parameters:
+///
+/// * `map` : A map of type `Map[K, V]` to search in.
+/// * `key` : The key to look up in the map.
+/// * `value` : The value to be compared with the value associated with the key.
+///
+/// Returns `true` if the map contains the specified key and its associated value
+/// equals the given value, `false` otherwise.
+///
+/// Example:
+///
+/// ```moonbit
+/// 
+/// test "Map::contains_kv" {
+///   let map = { "a": 1, "b": 2 }
+///   inspect!(map.contains_kv("a", 1), content="true")
+///   inspect!(map.contains_kv("a", 2), content="false")
+///   inspect!(map.contains_kv("c", 3), content="false")
+/// }
+/// ```
+pub fn Map::contains_kv[K : Hash + Eq, V : Eq](
+  self : Map[K, V],
+  key : K,
+  value : V
+) -> Bool {
+  // inline Map::get to avoid boxing
+  let hash = key.hash()
+  for i = 0, idx = hash & self.capacity_mask {
+    guard self.entries[idx] is Some(entry) else { break false }
+    if entry.hash == hash && entry.key == key && entry.value == value {
+      break true
+    }
+    if i > entry.psl {
+      break false
+    }
+    continue i + 1, (idx + 1) & self.capacity_mask
   }
 }
 
@@ -264,22 +310,18 @@ pub fn Map::contains[K : Hash + Eq, V](self : Map[K, V], key : K) -> Bool {
 pub fn Map::remove[K : Hash + Eq, V](self : Map[K, V], key : K) -> Unit {
   let hash = key.hash()
   for i = 0, idx = hash & self.capacity_mask {
-    match self.entries[idx] {
-      Some(entry) => {
-        if entry.hash == hash && entry.key == key {
-          self.entries[idx] = None
-          self.remove_entry(entry)
-          self.shift_back(idx)
-          self.size -= 1
-          break
-        }
-        if i > entry.psl {
-          break
-        }
-        continue i + 1, (idx + 1) & self.capacity_mask
-      }
-      None => break
+    guard self.entries[idx] is Some(entry) else { break }
+    if entry.hash == hash && entry.key == key {
+      self.entries[idx] = None
+      self.remove_entry(entry)
+      self.shift_back(idx)
+      self.size -= 1
+      break
     }
+    if i > entry.psl {
+      break
+    }
+    continue i + 1, (idx + 1) & self.capacity_mask
   }
 }
 
@@ -465,9 +507,7 @@ pub fn Map::iter[K, V](self : Map[K, V]) -> Iter[(K, V)] {
   Iter::new(fn(yield_) {
     loop self.head {
       Some({ key, value, idx, .. }) => {
-        if yield_((key, value)) == IterEnd {
-          break IterEnd
-        }
+        guard yield_((key, value)) is IterContinue else { break IterEnd }
         continue self.list[idx].next
       }
       None => break IterContinue
@@ -479,12 +519,10 @@ pub fn Map::iter[K, V](self : Map[K, V]) -> Iter[(K, V)] {
 pub fn Map::iter2[K, V](self : Map[K, V]) -> Iter2[K, V] {
   Iter2::new(fn(yield_) {
     loop self.head {
-      Some({ key, value, idx, .. }) =>
-        if yield_(key, value) == IterEnd {
-          IterEnd
-        } else {
-          continue self.list[idx].next
-        }
+      Some({ key, value, idx, .. }) => {
+        guard yield_(key, value) is IterContinue else { break IterEnd }
+        continue self.list[idx].next
+      }
       None => IterContinue
     }
   })
@@ -494,11 +532,10 @@ pub fn Map::iter2[K, V](self : Map[K, V]) -> Iter2[K, V] {
 pub fn Map::keys[K, V](self : Map[K, V]) -> Iter[K] {
   Iter::new(fn(yield_) {
     loop self.head {
-      Some({ key, idx, .. }) =>
-        match yield_(key) {
-          IterEnd => IterEnd
-          IterContinue => continue self.list[idx].next
-        }
+      Some({ key, idx, .. }) => {
+        guard yield_(key) is IterContinue else { break IterEnd }
+        continue self.list[idx].next
+      }
       None => IterContinue
     }
   })
@@ -508,11 +545,10 @@ pub fn Map::keys[K, V](self : Map[K, V]) -> Iter[K] {
 pub fn Map::values[K, V](self : Map[K, V]) -> Iter[V] {
   Iter::new(fn(yield_) {
     loop self.head {
-      Some({ value, idx, .. }) =>
-        match yield_(value) {
-          IterEnd => IterEnd
-          IterContinue => continue self.list[idx].next
-        }
+      Some({ value, idx, .. }) => {
+        guard yield_(value) is IterContinue else { break IterEnd }
+        continue self.list[idx].next
+      }
       None => IterContinue
     }
   })
@@ -539,14 +575,10 @@ pub impl[K : Hash + Eq, V : Eq] Eq for Map[K, V] with op_equal(
   self : Map[K, V],
   that : Map[K, V]
 ) -> Bool {
-  if self.size != that.size {
-    return false
-  }
+  guard self.size == that.size else { return false }
   for k, v in self {
-    match that.get(k) {
-      None => break false
-      Some(v_) => if v_ != v { break false }
-    }
+    guard that.contains_kv(k, v) else { return false }
+
   } else {
     true
   }
